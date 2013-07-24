@@ -13,17 +13,22 @@ Opt("ExpandVarStrings", 1)
 Opt("GUIOnEventMode", 1)
 Opt("WinTitleMatchMode", 2)
 Opt("SendCapslockMode", 0)
+Opt("SendKeyDelay", 50)
+Opt("SendKeyDownDelay", 50)
 
 Global Const $ONE_MINUTE = 60 * 1000
 
 Global Const $MTW_TITLE = "My Trade Wizard"
 Global Const $MTW = "[TITLE:$MTW_TITLE$; CLASS:AutoIt v3 GUI]"
 
-Global Const $INI_FILE = ".\mtw.ini"
-Global Const $LOG_FILE = ".\mtw.log"
+Global Const $MTW_INI = ".\mtw.ini"
+Global Const $MTW_LOG = ".\mtw.log"
 
 Global Const $DO_YOU_WANT_TO_RUN_THIS_APPLICATION = "[TITLE:Security Information; CLASS:SunAwtDialog]"
-Global Const $LOGIN_WIN = "[TITLE:Login; CLASS:SunAwtFrame]"
+Global Const $LOGIN_FRAME = "[TITLE:Login; CLASS:SunAwtFrame]"
+Global Const $EXISTING_SESSION_DETECTED = "[TITLE:Existing session detected; CLASS:SunAwtDialog]"
+
+Global Const $TWS_JNLP = ".\tws.jnlp"
 
 Func RestartTWS()
    SetStatus("Restarting TWS...")
@@ -36,16 +41,26 @@ Func RestartTWS()
 EndFunc
 
 Func StopTWS()
-   While WinExists($tws)
+   If WinExists($tws) Then
 	  SetStatus("Closing TWS main window...")
-	  WinClose($tws)
-	  ConfirmExit()
-	  WinWaitClose($tws)
-	  _FileWriteLog($LOG_FILE, "Stopped TWS")
-   WEnd
+	  While WinExists($tws)
+		 WinKill($tws)
+		 ConfirmExit()
+	  WEnd
+	  _FileWriteLog($MTW_LOG, "Stopped TWS")
+   EndIf
    CleanUp()
    SetStatus("Disabled")
    $enabled = False
+EndFunc
+
+Func ConfirmExit()
+   Local $tws_dialog = "[TITLE:$tws_title$; CLASS:SunAwtDialog]"
+   If WinExists($tws_dialog) Then
+	  SetStatus("Confirming TWS exit...")
+	  ControlSend($tws_dialog, "", "", "{SPACE}")
+	  ControlSend($tws_dialog, "", "", "{ESCAPE}")
+   EndIf
 EndFunc
 
 Func CleanUp()
@@ -54,9 +69,9 @@ Func CleanUp()
 	  WinKill($DO_YOU_WANT_TO_RUN_THIS_APPLICATION)
    WEnd
    
-   While WinExists($LOGIN_WIN)
-	  SetStatus("Closing TWS login window...")
-	  WinKill($LOGIN_WIN)
+   While WinExists($LOGIN_FRAME)
+	  SetStatus("Closing TWS login frame...")
+	  WinKill($LOGIN_FRAME)
    WEnd
 	  
    Local $title[11]
@@ -80,30 +95,26 @@ Func CleanUp()
    Next
 EndFunc
 
-Func ConfirmExit()
-   Local Const $ARE_YOU_SURE_YOU_WANT_TO_EXIT = "[TITLE:$tws_title$; CLASS:SunAwtDialog]"
-   While WinExists($tws) And WinExists($ARE_YOU_SURE_YOU_WANT_TO_EXIT) = False
-	  BriefPause()
-   WEnd
-   If WinExists($ARE_YOU_SURE_YOU_WANT_TO_EXIT) Then
-	  SetStatus("Confirming TWS exit...")
-	  While WinExists($ARE_YOU_SURE_YOU_WANT_TO_EXIT)
-		 WinActivate($ARE_YOU_SURE_YOU_WANT_TO_EXIT)
-		 Send("{ENTER}")
-	  WEnd
-   EndIf
-EndFunc
-
 Func StartTWS()
    SetStatus("Starting TWS...")
    GUICtrlSetState($start_button, $GUI_DISABLE)
    GUICtrlSetState($stop_button, $GUI_ENABLE)
    While Not WinExists($tws)
+	  CleanUp()
 	  RunTwsJnlp()
-	  If $fInterrupt Then
-		 SetStatus("Interrupting TWS start up...")
-		 Return
-	  EndIf
+	  Local $iBegin = TimerInit()
+	  Do
+		 If $fInterrupt Then
+			SetStatus("Interrupting Login...")
+			CleanUp()
+			Return
+		 ElseIf WinExists($LOGIN_FRAME) Then
+			ExitLoop
+		 Else
+			SetStatus("Waiting for Login prompt...")
+			BriefPause()
+		 EndIf
+	  Until TimerDiff($iBegin) > $ONE_MINUTE
 	  Login()
 	  Local $iBegin = TimerInit()
 	  Do
@@ -112,16 +123,19 @@ Func StartTWS()
 			CleanUp()
 			Return
 		 ElseIf WinExists($tws) Then
-			SetStatus("TWS is running")
-			ExitLoop
+			SetStatus("Enabled")
+			$enabled = True
+			_FileWriteLog($MTW_LOG, "Started TWS")
+			Return
+		 ElseIf WinExists($EXISTING_SESSION_DETECTED) Then
+			SetStatus("Disconnecting other session...")
+			ControlSend($EXISTING_SESSION_DETECTED, "", "", "{SPACE}")
 		 Else
 			SetStatus("Waiting for TWS to start up...")
 			BriefPause()
 		 EndIf
-	  Until TimerDiff($iBegin) > $ONE_MINUTE
+	  Until TimerDiff($iBegin) > 5 * $ONE_MINUTE
    WEnd
-   $enabled = True
-   _FileWriteLog($LOG_FILE, "Started TWS")
 EndFunc
 
 Func RunTwsJnlp()
@@ -131,15 +145,14 @@ Func RunTwsJnlp()
 	  Return
    EndIf
    SetStatus("Launching TWS JNLP...")
-   ShellExecute($tws_jnlp)
+   ShellExecute($TWS_JNLP)
    ConfirmRun()
 EndFunc
 
 Func DownloadTwsJnlp()
    SetStatus("Downloading TWS JNLP...")
-   Global $tws_jnlp = ".\tws.jnlp"
-   Local $url = "http://www.interactivebrokers.com/java/classes/tws.jnlp"
-   InetGet($url, $tws_jnlp)
+   Local Const $URL = "http://www.interactivebrokers.com/java/classes/tws.jnlp"
+   InetGet($URL, $TWS_JNLP)
 EndFunc
 
 Func ConfirmRun()
@@ -148,7 +161,7 @@ Func ConfirmRun()
 	  If $fInterrupt Then
 		 SetStatus("Interrupting Login...")
 		 Return
-	  ElseIf WinExists($DO_YOU_WANT_TO_RUN_THIS_APPLICATION) Or WinExists($LOGIN_WIN) Then
+	  ElseIf WinExists($DO_YOU_WANT_TO_RUN_THIS_APPLICATION) Or WinExists($LOGIN_FRAME) Then
 		 ExitLoop
 	  Else
 		 BriefPause()
@@ -157,47 +170,23 @@ Func ConfirmRun()
    If WinExists($DO_YOU_WANT_TO_RUN_THIS_APPLICATION) Then
 	  SetStatus("Confirming TWS launch...")
 	  While WinExists($DO_YOU_WANT_TO_RUN_THIS_APPLICATION)
-		 WinActivate($DO_YOU_WANT_TO_RUN_THIS_APPLICATION)
-		 Send("{ENTER}")
+		 ControlSend($DO_YOU_WANT_TO_RUN_THIS_APPLICATION, "", "", "{SPACE}")
 	  WEnd
    EndIf
 EndFunc
 
 Func Login()
-   BlockInput(1)
-   Local $iBegin = TimerInit()
-   Do
-	  If $fInterrupt Then
-		 SetStatus("Interrupting Login...")
-		 CleanUp()
-		 BlockInput(0)
-		 Return
-	  ElseIf WinExists($LOGIN_WIN) Then
-		 ExitLoop
-	  Else
-		 SetStatus("Waiting for Login prompt...")
-		 BriefPause()
-	  EndIf
-   Until TimerDiff($iBegin) > $ONE_MINUTE
-   If WinExists($LOGIN_WIN) Then
+   If WinExists($LOGIN_FRAME) Then
 	  SetStatus("Logging in...")
-	  WinActivate($LOGIN_WIN)
-	  WinWaitActive($LOGIN_WIN)
-	  If WinActive($LOGIN_WIN) Then
-		 Send("{CAPSLOCK off}")
-		 Send($login)
-		 Send("{TAB}")
-		 Send($password)
-		 If $fInterrupt Then
-			SetStatus("Interrupting Login...")
-			CleanUp()
-			BlockInput(0)
-			Return
-		 EndIf
-		 Send("{ALTDOWN}o{ALTUP}")
-	  EndIf
+	  BlockInput(1)
+	  ControlFocus($LOGIN_FRAME, "", "")
+	  ControlSend($LOGIN_FRAME, "", "", "{CAPSLOCK off}")
+	  ControlSend($LOGIN_FRAME, "", "", $login)
+	  ControlSend($LOGIN_FRAME, "", "", "{TAB}")
+	  ControlSend($LOGIN_FRAME, "", "", $password)
+	  ControlSend($LOGIN_FRAME, "", "", "{ALTDOWN}o{ALTUP}")
+	  BlockInput(0)
    EndIf
-   BlockInput(0)
 EndFunc
 
 Func BriefPause()
@@ -242,21 +231,21 @@ Func CreateGui()
 
    GuiCtrlCreateGroup("Credentials", 5, 50, 310, 40)
    GUICtrlCreateLabel("Login:", 30, 65, 30, 20)
-   Global $login = IniRead($INI_FILE, "Credentials", "Login", "")
+   Global $login = IniRead($MTW_INI, "Credentials", "Login", "")
    Global $login_input = GUICtrlCreateInput($login, 65, 65, 80, 20)
    GUICtrlCreateLabel("Password:", 160, 65, 60, 20)
-   Global $password = IniRead($INI_FILE, "Credentials", "Password", "")
+   Global $password = IniRead($MTW_INI, "Credentials", "Password", "")
    Local Const $ES_PASSWORD = 0x0020
    Global $password_input = GUICtrlCreateInput($password, 215, 65, 80, 20, $ES_PASSWORD)
    
    GUICtrlCreateGroup("Restart At", 5, 95, 310, 40)
-   Global $hour = IniRead($INI_FILE, "RestartAt", "Hour", "00")
+   Global $hour = IniRead($MTW_INI, "RestartAt", "Hour", "00")
    Global $hour_input = GUICtrlCreateInput($hour, 30, 110, 20, 20)
    GUICtrlCreateLabel(":", 54, 112, 5, 20)
-   Global $minute = IniRead($INI_FILE, "RestartAt", "Minute", "00")
+   Global $minute = IniRead($MTW_INI, "RestartAt", "Minute", "00")
    Global $minute_input = GUICtrlCreateInput($minute, 60, 110, 20, 20)
    GUICtrlCreateLabel(":", 84, 112, 5, 20)
-   Global $second = IniRead($INI_FILE, "RestartAt", "Second", "00")
+   Global $second = IniRead($MTW_INI, "RestartAt", "Second", "00")
    Global $second_input = GUICtrlCreateInput($second, 90, 110, 20, 20)
 
    Global $start_button = GUICtrlCreateButton("Start", 85, 145, 60, 20)
@@ -274,7 +263,7 @@ Func CreateGui()
    GUIRegisterMsg($WM_COMMAND, "_WM_COMMAND")
    GUIRegisterMsg($WM_SYSCOMMAND, "_WM_SYSCOMMAND")
    
-   Local $mode = IniRead($INI_FILE, "General", "Mode", "Demo")
+   Local $mode = IniRead($MTW_INI, "General", "Mode", "Demo")
    If $mode = "Demo" Then
 	  ClickDemo()
    ElseIf $mode = "Live" Then
@@ -324,39 +313,24 @@ Func ClickStart()
    SetStatus("Handling Start Button")
    $fInterrupt = False
    If BitAND(GUICtrlRead($demo_radio), $GUI_CHECKED) = $GUI_CHECKED Then
+	  Local $mode = "Demo"
 	  $login = "edemo"
 	  $password = "demouser"
-	  IniWrite($INI_FILE, "General", "Mode", "Demo")
    ElseIf BitAND(GUICtrlRead($live_radio), $GUI_CHECKED) = $GUI_CHECKED Then
+	  Local $mode = "Live"
 	  $login = GUICtrlRead($login_input)
 	  $password = GUICtrlRead($password_input)
-	  IniWrite($INI_FILE, "General", "Mode", "Live")
    EndIf
-   IniWrite($INI_FILE, "Credentials", "Login", GUICtrlRead($login_input))
-   IniWrite($INI_FILE, "Credentials", "Password", GUICtrlRead($password_input))
    $hour = GUICtrlRead($hour_input)
-   IniWrite($INI_FILE, "RestartAt", "Hour", $hour)
    $minute = GUICtrlRead($minute_input)
-   IniWrite($INI_FILE, "RestartAt", "Minute", $minute)
    $second = GUICtrlRead($second_input)
-   IniWrite($INI_FILE, "RestartAt", "Second", $second)
-   If $fInterrupt Then
-	  SetStatus("Interrupting Start...")
-	  Return
-   EndIf
+   IniWrite($MTW_INI, "General", "Mode", $mode)
+   IniWrite($MTW_INI, "Credentials", "Login", GUICtrlRead($login_input))
+   IniWrite($MTW_INI, "Credentials", "Password", GUICtrlRead($password_input))
+   IniWrite($MTW_INI, "RestartAt", "Hour", $hour)
+   IniWrite($MTW_INI, "RestartAt", "Minute", $minute)
+   IniWrite($MTW_INI, "RestartAt", "Second", $second)
    RestartTWS()
-   Local $iBegin = TimerInit()
-   Do
-	  If $fInterrupt Then
-		 SetStatus("Interrupting TWS start up...")
-		 Return
-	  ElseIf WinExists($tws) Then
-		 ExitLoop
-	  Else
-		 BriefPause()
-	  EndIf
-   Until TimerDiff($iBegin) > $ONE_MINUTE
-   SetStatus("Enabled")
 EndFunc
 
 Func ClickStop()
