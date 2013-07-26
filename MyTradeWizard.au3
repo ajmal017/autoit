@@ -13,8 +13,8 @@ Opt("ExpandVarStrings", 1)
 Opt("GUIOnEventMode", 1)
 Opt("WinTitleMatchMode", 2)
 Opt("SendCapslockMode", 0)
-Opt("SendKeyDelay", 50)
-Opt("SendKeyDownDelay", 50)
+Opt("SendKeyDelay", 500)
+Opt("SendKeyDownDelay", 500)
 
 Global Const $ONE_MINUTE = 60 * 1000
 
@@ -180,11 +180,7 @@ Func Login()
 	  SetStatus("Logging in...")
 	  BlockInput(1)
 	  ControlFocus($LOGIN_FRAME, "", "")
-	  ControlSend($LOGIN_FRAME, "", "", "{CAPSLOCK off}")
-	  ControlSend($LOGIN_FRAME, "", "", $login)
-	  ControlSend($LOGIN_FRAME, "", "", "{TAB}")
-	  ControlSend($LOGIN_FRAME, "", "", $password)
-	  ControlSend($LOGIN_FRAME, "", "", "{ALTDOWN}o{ALTUP}")
+	  ControlSend($LOGIN_FRAME, "", "", "{CAPSLOCK off}$login${TAB}$password${ALTDOWN}o{ALTUP}")
 	  BlockInput(0)
    EndIf
 EndFunc
